@@ -424,6 +424,24 @@ class BridgeBase extends DCLogic {
       else self.setState({ pTyped: val });
     };
     var kbShift = s.kbShift || 'off';
+    var askPractice = function (tt) {
+      var tok = Date.now();
+      self.setState({ pAiTok: tok, pAiReply: '', pAiWell: '', pAiTry: '' });
+      var base = { partner: ps.partner, relation: 'friend', scene: ps.scene, goal: s.pGoal || '', opener: ps.opener || '', history: (ps.opener ? [['them', ps.opener]] : []).concat([['me', tt]]) };
+      var post = function (mode) {
+        return fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ mode: mode }, base)) })
+          .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      };
+      post('reply').then(function (d) {
+        if (self.state.pAiTok !== tok) return;
+        if (d && d.crisis) { self.setState({ screen: 'help', helpSent: false, prevScreen: 'practice' }); return; }
+        self.setState({ pAiReply: d && d.reply ? d.reply : 'fail' });
+      });
+      post('feedback').then(function (d) {
+        if (self.state.pAiTok !== tok || !d) return;
+        self.setState({ pAiWell: d.well || '', pAiTry: d.tryNext || '' });
+      });
+    };
     var barSend = function () {
       var sentOk = false;
       if (screen === 'dm') {
@@ -433,7 +451,7 @@ class BridgeBase extends DCLogic {
         // Tapping a suggestion fills the box; sending it unchanged keeps the guided feedback
         if (tt === '"' + ps.good + '"' || tt === ps.good) self.setState({ pChoice: 'good', pTyped: '' });
         else if (tt === ps.vague) self.setState({ pChoice: 'vague', pTyped: '' });
-        else self.setState({ pOwn: tt, pChoice: 'own', pTyped: '' });
+        else { self.setState({ pOwn: tt, pChoice: 'own', pTyped: '' }); askPractice(tt); }
         sentOk = true;
       }
       if (sentOk) {
@@ -733,11 +751,21 @@ class BridgeBase extends DCLogic {
       setTimeout(function () {
         if (self.state.dmSendToken === sendToken) self.setState({ dmTyping: dmKey });
       }, 500);
-      setTimeout(function () {
-        if (self.state.dmSendToken !== sendToken) return;
-        var m2 = Object.assign({}, self.state.dmMsgs || {}); m2[dmKey] = (m2[dmKey] || list).concat([['them', replyText]]);
-        self.setState({ dmMsgs: m2, dmTyping: '' });
-      }, 2000);
+      var started = Date.now();
+      var showReply = function (text) {
+        setTimeout(function () {
+          if (self.state.dmSendToken !== sendToken) return;
+          var m2 = Object.assign({}, self.state.dmMsgs || {}); m2[dmKey] = (m2[dmKey] || list).concat([['them', text]]);
+          self.setState({ dmMsgs: m2, dmTyping: '' });
+        }, Math.max(0, 1500 - (Date.now() - started)));
+      };
+      fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'reply', partner: dmd.name, relation: dmd.from, history: list }) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.crisis) { self.setState({ dmTyping: '', screen: 'help', helpSent: false, prevScreen: 'dm' }); return; }
+          showReply(d && d.reply ? d.reply : replyText);
+        })
+        .catch(function () { showReply(replyText); });
     };
     var tabBtn = function (k, label) {
       var on = cTab === k;
@@ -1207,7 +1235,7 @@ class BridgeBase extends DCLogic {
       trustSent: !!s.trustSent,
       pChosen: !!pChoice, pNotChosen: !pChoice,
       pText: pChoice === 'own' ? pOwn : (choiceGood ? ps.good : ps.vague),
-      pReply: choiceGood ? ps.goodReply : ps.vagueReply,
+      pReply: pChoice === 'own' ? (s.pAiReply && s.pAiReply !== 'fail' ? s.pAiReply : (s.pAiReply === 'fail' ? (choiceGood ? ps.goodReply : ps.vagueReply) : '…')) : (choiceGood ? ps.goodReply : ps.vagueReply),
       pTitle: ps.title, pPartner: ps.partner, pOpener: ps.opener, pHint: ps.hint,
       pGoodText: ps.good, pVagueText: ps.vague,
       showHint: pLevel === 1 || (pLevel === 2 && pHintUsed),
@@ -1229,8 +1257,8 @@ class BridgeBase extends DCLogic {
       askHint: function () { self.setState({ pHintUsed: true }); },
       pTyped: pTyped,
       setTyped: function (e) { self.setState({ pTyped: e.target.value }); },
-      sendTyped: function () { if (pTyped.trim()) self.setState({ pOwn: pTyped.trim(), pChoice: 'own', pTyped: '' }); },
-      typedKey: function (e) { if (e.key === 'Enter' && pTyped.trim()) self.setState({ pOwn: pTyped.trim(), pChoice: 'own', pTyped: '' }); },
+      sendTyped: function () { if (pTyped.trim()) { self.setState({ pOwn: pTyped.trim(), pChoice: 'own', pTyped: '' }); askPractice(pTyped.trim()); } },
+      typedKey: function (e) { if (e.key === 'Enter' && pTyped.trim()) { self.setState({ pOwn: pTyped.trim(), pChoice: 'own', pTyped: '' }); askPractice(pTyped.trim()); } },
       typedSendBg: pTyped.trim() ? 'var(--ink)' : '#C5CEC7',
       typedHasTone: pTyped.trim().length > 0,
       typedTone: typedEv.harsh ? 'Might sound harsh' : (typedEv.words < 4 ? 'A bit short' : ((typedEv.asks || typedEv.kind) ? 'Sounds friendly' : 'Okay so far')),
@@ -1242,8 +1270,8 @@ class BridgeBase extends DCLogic {
       pickGood: function () { self.setState({ pChoice: 'good' }); },
       pickVague: function () { self.setState({ pChoice: 'vague' }); },
       fbTitle: choiceGood ? 'You did it well' : 'Good start',
-      fbStar: pChoice === 'own' ? (ownEv.good ? 'You wrote it yourself' + (ownEv.asks ? ' and asked a question back, which keeps the chat going.' : ' and kept it warm and clear.') : 'You wrote your own reply. That is the hardest level, and you did it.') : (choiceGood ? ps.starGood : ps.starVague),
-      fbSpark: pChoice === 'own' ? (ownEv.harsh ? '"' + ownEv.harsh + '" can sound harsh. Try saying how you feel instead, like "I was looking forward to it."' : (ownEv.words < 4 ? 'Add a little more, like a question or how you feel, so they know what to say next.' : (ownEv.good ? (ownEv.asks ? 'Next time, share a little about you too, so it feels like a two-way chat.' : 'Ask a question back to keep it going.') : 'Try adding a question back or a kind word, so they feel welcome to reply.'))) : (choiceGood ? ps.sparkGood : ps.sparkVague),
+      fbStar: pChoice === 'own' && s.pAiWell ? s.pAiWell : pChoice === 'own' ? (ownEv.good ? 'You wrote it yourself' + (ownEv.asks ? ' and asked a question back, which keeps the chat going.' : ' and kept it warm and clear.') : 'You wrote your own reply. That is the hardest level, and you did it.') : (choiceGood ? ps.starGood : ps.starVague),
+      fbSpark: pChoice === 'own' && s.pAiTry ? s.pAiTry : pChoice === 'own' ? (ownEv.harsh ? '"' + ownEv.harsh + '" can sound harsh. Try saying how you feel instead, like "I was looking forward to it."' : (ownEv.words < 4 ? 'Add a little more, like a question or how you feel, so they know what to say next.' : (ownEv.good ? (ownEv.asks ? 'Next time, share a little about you too, so it feels like a two-way chat.' : 'Ask a question back to keep it going.') : 'Try adding a question back or a kind word, so they feel welcome to reply.'))) : (choiceGood ? ps.sparkGood : ps.sparkVague),
       hasUnsafe: !!cd.m3,
       m3Name: cd.m3 ? cd.m3[0] : '', m3Text: cd.m3 ? cd.m3[1] : '',
       showUnsafeCard: !s.unsafeHandled,
