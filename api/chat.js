@@ -1,24 +1,33 @@
 // Vercel serverless function: Mo's live replies and feedback, powered by Claude.
 // Needs the ANTHROPIC_API_KEY environment variable (set it in Vercel, never in code).
 
-const MODEL = 'claude-haiku-5-5';
+const MODELS = ['claude-haiku-5-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'];
 const CRISIS = /\b(kill myself|end my life|suicid|self[- ]?harm|hurt myself|want to die|don'?t want to (be here|live)|no reason to live)\b/i;
 
 const clean = (t, max = 500) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 async function askClaude(system, messages, maxTokens) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, temperature: 0.7, system, messages }),
-  });
-  if (!r.ok) throw new Error('Claude API ' + r.status);
-  const data = await r.json();
-  return (data.content || []).map((c) => c.text || '').join('').trim();
+  let lastErr = '';
+  for (const model of MODELS) {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.7, system, messages }),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      return (data.content || []).map((c) => c.text || '').join('').trim();
+    }
+    const info = await r.json().catch(() => ({}));
+    lastErr = r.status + ' ' + ((info.error && info.error.message) || '');
+    // Only try the next model when this one isn't available; stop on key, credit or rate errors
+    if (r.status !== 404 && !/model/i.test(lastErr)) break;
+  }
+  throw new Error(lastErr);
 }
 
 // Turn [['me', text], ['them', text]] into alternating user/assistant turns
@@ -83,6 +92,6 @@ export default async function handler(req, res) {
     const tryNext = (out.match(/TRY:\s*(.+)/i) || [])[1] || '';
     return res.status(200).json({ well: well.trim(), tryNext: tryNext.trim() });
   } catch (e) {
-    return res.status(502).json({ error: 'AI unavailable' });
+    return res.status(502).json({ error: 'AI unavailable', detail: String(e.message || '').slice(0, 200) });
   }
 }
