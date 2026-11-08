@@ -1438,6 +1438,16 @@ class Bridge extends BridgeBase {
   }
   stopBreathe() { if (this._breathe) { clearInterval(this._breathe); this._breathe = null; } }
   componentDidMount() {
+    if (typeof window !== 'undefined' && window.visualViewport) {
+      var vvp = window.visualViewport;
+      this._fit = function () {
+        document.documentElement.style.setProperty('--vvh', vvp.height + 'px');
+        window.scrollTo(0, 0);
+      };
+      vvp.addEventListener('resize', this._fit);
+      vvp.addEventListener('scroll', this._fit);
+      this._fit();
+    }
     var vv = window.visualViewport;
     var this_ = this;
     if (vv) {
@@ -1459,6 +1469,7 @@ class Bridge extends BridgeBase {
     var self = this; this._clock = setInterval(function () { self.setState({ clockTick: Date.now() }); }, 30000); }
   componentWillUnmount() {
     var vv = window.visualViewport;
+    if (vv && this._fit) { vv.removeEventListener('resize', this._fit); vv.removeEventListener('scroll', this._fit); }
     if (vv && this._kb) { vv.removeEventListener('resize', this._kb); vv.removeEventListener('scroll', this._kb); }
     this.stopBreathe(); if (this._clock) clearInterval(this._clock); }
   moHost(el) { return (el && el.closest && el.closest('.phone')) || document.documentElement; }

@@ -345,3 +345,17 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 .sticky-cta.start-cta{position:fixed;left:20px;right:20px;bottom:20px;height:56px;padding:0;background:transparent;z-index:50;display:block}
 .sticky-cta.start-cta>button{width:100%;height:56px;border-radius:999px;background:#1E1B2E;color:#fff;font-size:16px;font-weight:600;border:0;box-shadow:0 4px 20px rgba(30,27,46,.2);display:flex;align-items:center;justify-content:center}
 .screen-transition:has(.start-cta){padding-bottom:100px!important}
+
+@media (max-width:500px){
+  .phone{height:var(--vvh,100dvh)!important}
+}
+html,body{position:fixed;inset:0;width:100%}
+
+/* Real phones already show their own time, Wi-Fi and battery: hide the pretend iPhone bars */
+@media (pointer:coarse){
+  .status-bar,.ios-status,.home-indicator{display:none!important}
+  .screen-transition{padding-top:env(safe-area-inset-top)}
+  .sticky-header,.tab-sticky-header{box-shadow:none}
+}
+/* Narrow phones: let the greeting wrap so it never runs into the brave-steps pill */
+@media (max-width:430px){.tab-sticky-header h1{white-space:normal!important;font-size:26px!important;line-height:1.15!important;min-width:0}}
